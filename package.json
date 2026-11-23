@@ -1,0 +1,1 @@
+{"dependencies":{"playwright":"1.49.1"},"description":"Parallel GitHub Actions render farm for the Sun-vanished 9:16 explainer (1200 frames, 1080x1920, 30fps)","name":"sun-vanished-render","private":true,"scripts":{"render":"node render-farm.js"},"version":"1.0.0"}

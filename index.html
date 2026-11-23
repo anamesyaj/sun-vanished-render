@@ -13,44 +13,42 @@ canvas{display:block}
 const W=1080,H=1920,cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 // ---------- deterministic RNG ----------
 function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
-const R=mulberry32(20261123);
+const R=mulberry32(20261214);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const lerp=(a,b,u)=>a+(b-a)*u;
 const easeIO=u=>u<.5?4*u*u*u:1-Math.pow(-2*u+2,3)/2;
 const easeOQ=u=>1-Math.pow(1-u,5);
-const spring=u=>u<=0?0:1-Math.exp(-5.5*u)*Math.cos(11*u); // damped pop, u in seconds-ish scaled
+const spring=u=>u<=0?0:1-Math.exp(-5.5*u)*Math.cos(11*u);
 // ---------- precomputed scene data ----------
 const stars=[];
 for(let L=0;L<3;L++){const n=[260,180,120][L];for(let i=0;i<n;i++)stars.push({x:R()*1900-340,y:R()*2300-160,r:[1.1,1.7,2.5][L],L,ph:R()*6.28,sp:2+R()*3,spark:L===2&&R()<0.4});}
 const nebula=[{x:240,y:300,r:480,c:'24,150,160',a:.20},{x:820,y:260,r:520,c:'40,95,195',a:.16},{x:560,y:1500,r:460,c:'220,95,110',a:.10},{x:180,y:1650,r:440,c:'60,70,175',a:.15},{x:950,y:1350,r:480,c:'24,150,160',a:.13}];
-const granules=[];for(let i=0;i<28;i++)granules.push({a:R()*6.28,d:Math.sqrt(R())*.92,s:8+R()*22,sp:.1+R()*.3,ph:R()*6.28});
 const city=[];for(let i=0;i<380;i++){const a=R()*6.28,d=Math.sqrt(R())*.96;city.push({x:Math.cos(a)*d,y:Math.sin(a)*d,s:.8+R()*1.6,dl:R()*.5});}
 const land=[];const landCols=['#5fc47a','#48ad6b','#f5c75f','#3a9d62'];
 for(let i=0;i<26;i++)land.push({x:(R()*1.5-.75),y:(R()*1.3-.65),rx:.14+R()*.26,ry:.10+R()*.18,c:landCols[i%4],rot:R()*3});
 const clouds=[];for(let i=0;i<20;i++)clouds.push({x:(R()*1.7-.85),y:(R()*1.5-.75),l:.16+R()*.3,ph:R()*6.28});
-const frostSpikes=[];for(let i=0;i<40;i++)frostSpikes.push({a:-Math.PI/2+(R()-.5)*1.5,l:.2+R()*.5});for(let i=0;i<40;i++)frostSpikes.push({a:Math.PI/2+(R()-.5)*1.5,l:.2+R()*.5});
+const craters=[];for(let i=0;i<17;i++){const a=R()*6.28,d=Math.sqrt(R())*.78;craters.push({x:Math.cos(a)*d,y:Math.sin(a)*d,r:.06+R()*.13});}
+const eggs=[];for(let i=0;i<26;i++)eggs.push({dx:(R()-.5)*260,delay:R()*0.8,rise:120+R()*110,ph:R()*6.28,s:3+R()*4});
+const coralBr=[];for(let i=0;i<9;i++)coralBr.push({a:-Math.PI/2+(i-4)*0.22,l:44+((i*37)%40),w:7-(i%3)});
 // grain patterns
 const grains=[];
-for(let g=0;g<24;g++){const c=document.createElement('canvas');c.width=c.height=256;const x=c.getContext('2d');const id=x.createImageData(256,256);const rr=mulberry32(900+g);for(let i=0;i<id.data.length;i+=4){const v=rr()*255|0;id.data[i]=id.data[i+1]=id.data[i+2]=v;id.data[i+3]=255;}x.putImageData(id,0,0);grains.push(c);}
+for(let g=0;g<24;g++){const c=document.createElement('canvas');c.width=c.height=256;const x=c.getContext('2d');const id=x.createImageData(256,256);const rr2=mulberry32(900+g);for(let i=0;i<id.data.length;i+=4){const v=rr2()*255|0;id.data[i]=id.data[i+1]=id.data[i+2]=v;id.data[i+3]=255;}x.putImageData(id,0,0);grains.push(c);}
 // ---------- world ----------
-const SUN={x:0,y:620,r:210};
-function earthPos(t){
-  let x=620,y=960;
-  if(t>20.46){const p=(t-20.46)/6.5;const off=1150*p*p;x+=0.48*off;y+=-0.877*off;}
-  return{x,y,r:150};
+const MOON={x:730,y:580,r:225};
+const EARTH={x:410,y:1160,r:165};
+function tiltDev(st){
+  if(st<20.6)return 0;
+  const u=st-20.6,grow=clamp(u/6,0,1);
+  return grow*(13*Math.sin(0.85*u)+9*Math.sin(1.9*u+1.2));
 }
-function frontR(t){ // darkness front radius from Sun centre (world px)
-  const pts=[[1.31,0],[5.6,113],[9.6,255],[12.5,425],[14.16,600],[14.86,820],[17,990],[30,990]];
-  if(t<=pts[0][0])return 0;for(let i=1;i<pts.length;i++){if(t<=pts[i][0]){const u=(t-pts[i-1][0])/(pts[i][0]-pts[i-1][0]);return lerp(pts[i-1][1],pts[i][1],u);}}return 1750;
-}
-function dayFrac(t){if(t<14.16)return 1;if(t>14.86)return 0;return 1-(t-14.16)/0.7;}
-// camera keys: [t, zoom, target] target 'sun'|'earth'|'mid'|'orbit'|'title'
-const CAM=[[0,2.6,'sun'],[1.6,2.6,'sun'],[3.0,1.0,'mid'],[5.6,1.0,'mid'],[7.5,2.6,'earth'],[9.6,2.7,'earth'],[12.5,0.42,'orbit'],[14.5,0.95,'mid'],[16.4,1.05,'mid'],[19.5,0.9,'mid'],[21.5,0.6,'orbit'],[22.8,1.8,'earth'],[25.2,1.8,'earth'],[27.2,1.2,'earth'],[27.9,1.0,'title'],[30,1.03,'title']];
+function bulgeAmt(st){if(st<9.6)return 1;if(st>12.4)return 0.33;return lerp(1,0.33,easeIO((st-9.6)/2.8));}
+// camera keys: [t, zoom, target]
+const CAM=[[0,2.4,'moon'],[1.9,2.4,'moon'],[3.4,1.0,'mid'],[7.4,1.0,'mid'],[9.4,1.85,'earth'],[13.6,1.85,'earth'],[15.6,1.7,'earth'],[17.6,1.7,'earth'],[20.4,1.0,'mid'],[24.6,1.12,'mid'],[27.6,1.0,'mid'],[29.4,1.0,'title'],[32,1.03,'title']];
 function camTarget(name,t){
-  const e=earthPos(t);
-  if(name==='sun')return{x:120,y:620}; if(name==='earth')return{x:e.x,y:e.y};
-  if(name==='orbit')return{x:430,y:880}; if(name==='title')return{x:540,y:960};
-  return{x:530,y:900};
+  if(name==='moon')return{x:700,y:600};
+  if(name==='earth')return{x:EARTH.x,y:EARTH.y};
+  if(name==='title')return{x:540,y:960};
+  return{x:520,y:930};
 }
 function camera(t){
   let i=0;while(i<CAM.length-2&&t>CAM[i+1][0])i++;
@@ -61,7 +59,6 @@ function camera(t){
 // ---------- helpers ----------
 function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
 function pill(lines,cx,cy,color,t0,scale=1){
-  // text pill with rise-through-clip reveal
   ctx.save();ctx.font="800 34px Mont";let w=0;lines.forEach(s=>{w=Math.max(w,ctx.measureText(s).width+8*s.length);});
   let pw=(w+56)*scale,ph=(lines.length*44+26)*scale;
   if(pw>1000){const k=1000/pw;scale*=k;pw*=k;ph*=k;}
@@ -74,7 +71,7 @@ function pill(lines,cx,cy,color,t0,scale=1){
   lines.forEach((s,i)=>{const ly=cy+(i-(lines.length-1)/2)*44*scale+(1-p)*1.3*44;ctx.save();ctx.translate(cx,ly);ctx.scale(scale,scale);drawSpaced(s,0,0,8);ctx.restore();});
   ctx.restore();
 }
-function drawSpaced(s,x,y,sp){ // letter-spaced centred text (current font)
+function drawSpaced(s,x,y,sp){
   const ws=[...s].map(ch=>ctx.measureText(ch).width);const tot=ws.reduce((a,b)=>a+b,0)+sp*(s.length-1);
   let cxp=x-tot/2;const old=ctx.textAlign;ctx.textAlign='left';
   [...s].forEach((ch,i)=>{ctx.fillText(ch,cxp,y);cxp+=ws[i]+sp;});ctx.textAlign=old;
@@ -89,79 +86,83 @@ function bigText(lines,cx,cy,size,color,t0){
   ctx.restore();
 }
 // ---------- elements ----------
-function drawSun(t,st){
-  const cx=SUN.x,cy=SUN.y;let s=1;
-  if(st>=0.76&&st<0.98)s=1+0.06*Math.sin(Math.PI*(st-0.76)/0.22);
-  if(st>=0.98&&st<1.31)s=lerp(1.06,0,(st-0.98)/0.33);
-  if(st>=1.31)return;
-  const r=SUN.r*s;if(r<=1)return;
-  ctx.save();ctx.globalCompositeOperation='lighter';
-  [2.1,1.76,1.48,1.23].forEach((m,i)=>{const g=ctx.createRadialGradient(cx,cy,r*m*.8,cx,cy,r*m);g.addColorStop(0,'rgba(255,160,60,0.10)');g.addColorStop(1,'rgba(255,140,50,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,r*m,0,6.29);ctx.fill();});
-  ctx.restore();
-  ctx.save();ctx.translate(cx,cy);ctx.rotate(t*0.02);ctx.fillStyle='rgba(255,190,90,0.10)';
-  for(let i=0;i<18;i++){ctx.save();ctx.rotate(i/18*6.283);ctx.beginPath();ctx.moveTo(r*1.05,-r*.09);ctx.lineTo(r*1.65,0);ctx.lineTo(r*1.05,r*.09);ctx.fill();ctx.restore();}
-  ctx.restore();
-  const g=ctx.createRadialGradient(cx-r*.35,cy-r*.35,r*.1,cx,cy,r);
-  g.addColorStop(0,'#fff7dc');g.addColorStop(.55,'#ffc857');g.addColorStop(1,'#ff8f4a');
+function drawMoon(t,st){
+  if(st>=1.55)return;
+  let s=1;
+  if(st>=1.0&&st<1.22)s=1+0.06*Math.sin(Math.PI*(st-1.0)/0.22);
+  if(st>=1.22&&st<1.55)s=lerp(1.06,0,(st-1.22)/0.33);
+  const r=MOON.r*s;if(r<=1)return;
+  const cx=MOON.x,cy=MOON.y;
+  const hg=ctx.createRadialGradient(cx,cy,r*.85,cx,cy,r*1.45);
+  hg.addColorStop(0,'rgba(210,228,248,0.20)');hg.addColorStop(1,'rgba(210,228,248,0)');
+  ctx.fillStyle=hg;ctx.beginPath();ctx.arc(cx,cy,r*1.45,0,6.29);ctx.fill();
+  const g=ctx.createRadialGradient(cx-r*.38,cy-r*.38,r*.1,cx,cy,r);
+  g.addColorStop(0,'#fbfdfe');g.addColorStop(.55,'#dbe4ec');g.addColorStop(1,'#aebccb');
   ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,r,0,6.29);ctx.fill();
   ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,6.29);ctx.clip();
-  granules.forEach(gr=>{const gx=cx+Math.cos(gr.a+t*gr.sp)*gr.d*r,gy=cy+Math.sin(gr.a+t*gr.sp)*gr.d*r;
-    const gg=ctx.createRadialGradient(gx,gy,0,gx,gy,gr.s);gg.addColorStop(0,'rgba(255,250,220,0.5)');gg.addColorStop(1,'rgba(255,200,90,0)');
-    ctx.fillStyle=gg;ctx.beginPath();ctx.arc(gx,gy,gr.s,0,6.29);ctx.fill();});
+  craters.forEach(c=>{const px=cx+c.x*r,py=cy+c.y*r,pr=c.r*r;
+    ctx.fillStyle='rgba(140,155,172,0.55)';ctx.beginPath();ctx.arc(px,py,pr,0,6.29);ctx.fill();
+    ctx.strokeStyle='rgba(250,252,255,0.5)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(px,py,pr,Math.PI*1.05,Math.PI*1.75);ctx.stroke();
+    ctx.fillStyle='rgba(120,135,152,0.35)';ctx.beginPath();ctx.arc(px+pr*.18,py+pr*.18,pr*.62,0,6.29);ctx.fill();});
+  const tg=ctx.createLinearGradient(cx-r,cy,cx+r,cy);
+  tg.addColorStop(0,'rgba(30,45,70,0)');tg.addColorStop(.78,'rgba(30,45,70,0)');tg.addColorStop(1,'rgba(30,45,70,0.30)');
+  ctx.fillStyle=tg;ctx.fillRect(cx-r,cy-r,2*r,2*r);
   ctx.restore();
+  ctx.strokeStyle='rgba(190,220,250,0.5)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(cx,cy,r,0,6.29);ctx.stroke();
 }
 function drawEarth(t,st){
-  const e=earthPos(t),df=dayFrac(t),r=e.r;
+  const e=EARTH,r=e.r,ba=bulgeAmt(st);
+  // tide bulge (translucent ellipse stretched toward where the Moon was)
+  ctx.save();ctx.translate(e.x,e.y);ctx.rotate(-0.62);
+  const bg2=ctx.createRadialGradient(0,0,r*.6,0,0,r*1.34);
+  bg2.addColorStop(0,'rgba(90,180,235,0)');bg2.addColorStop(.82,'rgba(90,180,235,0.10)');bg2.addColorStop(1,'rgba(90,180,235,0)');
+  ctx.fillStyle=bg2;ctx.beginPath();ctx.ellipse(0,0,r*(1+0.30*ba),r*(1+0.05*ba),0,0,6.29);ctx.fill();
+  ctx.strokeStyle=`rgba(140,215,250,${0.25+0.3*ba})`;ctx.lineWidth=3;
+  ctx.beginPath();ctx.ellipse(0,0,r*(1+0.30*ba),r*(1+0.05*ba),0,0,6.29);ctx.stroke();ctx.restore();
   // atmosphere halo
   const hg=ctx.createRadialGradient(e.x,e.y,r*.9,e.x,e.y,r*1.22);
-  hg.addColorStop(0,'rgba(90,190,235,0)');hg.addColorStop(.8,`rgba(90,190,235,${0.10+0.14*df})`);hg.addColorStop(1,'rgba(90,190,235,0)');
+  hg.addColorStop(0,'rgba(90,190,235,0)');hg.addColorStop(.8,'rgba(90,190,235,0.16)');hg.addColorStop(1,'rgba(90,190,235,0)');
   ctx.fillStyle=hg;ctx.beginPath();ctx.arc(e.x,e.y,r*1.22,0,6.29);ctx.fill();
   ctx.save();ctx.beginPath();ctx.arc(e.x,e.y,r,0,6.29);ctx.clip();
-  const og=ctx.createLinearGradient(e.x-r,e.y,e.x+r,e.y);og.addColorStop(0,'#4dc7eb');og.addColorStop(1,'#1a66b8');
+  const og=ctx.createLinearGradient(e.x-r,e.y,e.x+r,e.y);og.addColorStop(0,'#3d8fc4');og.addColorStop(1,'#16406e');
   ctx.fillStyle=og;ctx.fillRect(e.x-r,e.y-r,2*r,2*r);
-  const spin=t*0.0096; // 0.55 deg/s
+  const spin=t*0.0096;
   land.forEach(L=>{let lx=L.x+spin;lx=((lx+1.1)%2.2)-1.1;if(Math.abs(lx)>1||Math.abs(L.y)>.92)return;
     const sx=Math.sqrt(Math.max(.1,1-L.y*L.y));ctx.save();ctx.translate(e.x+lx*r,e.y+L.y*r);ctx.rotate(L.rot);
     ctx.fillStyle=L.c;ctx.beginPath();ctx.ellipse(0,0,L.rx*r*sx,L.ry*r,0,0,6.29);ctx.fill();ctx.restore();});
-  ctx.fillStyle='#f1f8ff';ctx.beginPath();ctx.ellipse(e.x,e.y-r*.93,r*.55,r*.16,0,0,6.29);ctx.fill();
-  ctx.beginPath();ctx.ellipse(e.x,e.y+r*.93,r*.55,r*.16,0,0,6.29);ctx.fill();
+  // ice caps (extent wanders with the seasons beat)
+  let iceExt=1;
+  if(st>24.8)iceExt=1+0.45*Math.sin(0.85*(st-20.6)+0.6);
+  ctx.fillStyle='#f1f8ff';
+  ctx.beginPath();ctx.ellipse(e.x,e.y-r*(1-0.10*iceExt),r*.55*iceExt,r*.16*iceExt,0,0,6.29);ctx.fill();
+  ctx.beginPath();ctx.ellipse(e.x,e.y+r*(1-0.10*iceExt),r*.55*iceExt,r*.16*iceExt,0,0,6.29);ctx.fill();
+  // deepening night after the Moon goes
+  const night=clamp((st-7.6)/1.1,0,1);
+  ctx.fillStyle=`rgba(6,12,36,${0.18+0.30*night})`;ctx.fillRect(e.x-r,e.y-r,2*r,2*r);
   clouds.forEach(c=>{let lx=c.x+spin*1.4+Math.sin(t*.3+c.ph)*.02;lx=((lx+1.15)%2.3)-1.15;if(Math.abs(lx)>1)return;
-    ctx.fillStyle='rgba(255,255,255,0.75)';ctx.beginPath();ctx.ellipse(e.x+lx*r,e.y+c.y*r,c.l*r,r*.055,0,0,6.29);ctx.fill();});
-  // ocean specular
-  const sg=ctx.createRadialGradient(e.x-r*.45,e.y-r*.3,10,e.x-r*.45,e.y-r*.3,r*.8);
-  sg.addColorStop(0,`rgba(255,255,255,${0.20*df})`);sg.addColorStop(1,'rgba(255,255,255,0)');
-  ctx.fillStyle=sg;ctx.fillRect(e.x-r,e.y-r,2*r,2*r);
-  // night: terminator sweeps left->right as df falls
-  if(df<1){const tx=e.x-r+df*2*r;
-    const ng=ctx.createLinearGradient(tx-30,0,tx+30,0);
-    ng.addColorStop(0,'rgba(8,18,48,0)');ng.addColorStop(.5,'rgba(255,110,90,0.20)');ng.addColorStop(1,'rgba(8,18,48,0.92)');
-    ctx.fillStyle=ng;ctx.fillRect(tx-30,e.y-r,2*r,2*r);
-    ctx.fillStyle='rgba(8,18,48,0.92)';ctx.fillRect(tx+30,e.y-r,2*r,2*r);}
-  // city lights on night side
-  const nightA=clamp((1-df)*1.2,0,1);
-  if(nightA>0){const tx=e.x-r+df*2*r;city.forEach(c=>{const px=e.x+c.x*r,py=e.y+c.y*r;if(px<tx)return;
-    const pop=st>15.24?spring((st-15.24-c.dl)*3):0;const a=nightA*pop;if(a<=0)return;
-    ctx.fillStyle=`rgba(255,205,120,${a})`;ctx.beginPath();ctx.arc(px,py,c.s,0,6.29);ctx.fill();});}
-  // frost from poles
-  const fp=clamp((st-22.8)/2.3,0,1);
-  if(fp>0){ctx.fillStyle=`rgba(240,250,255,${0.35+0.5*fp})`;
-    frostSpikes.forEach(s=>{const len=s.l*r*fp;const bx=e.x+Math.cos(s.a)*r*.82,by=e.y+Math.sin(s.a)*r*.82;
-      ctx.save();ctx.translate(bx,by);ctx.rotate(s.a+Math.PI/2);ctx.beginPath();ctx.moveTo(-7,0);ctx.lineTo(0,-len);ctx.lineTo(7,0);ctx.fill();ctx.restore();});
-    ctx.beginPath();ctx.ellipse(e.x,e.y-r*(1-0.22*fp),r*.6,r*.22*fp+4,0,0,6.29);ctx.fill();
-    ctx.beginPath();ctx.ellipse(e.x,e.y+r*(1-0.22*fp),r*.6,r*.22*fp+4,0,0,6.29);ctx.fill();}
+    ctx.fillStyle='rgba(255,255,255,0.38)';ctx.beginPath();ctx.ellipse(e.x+lx*r,e.y+c.y*r,c.l*r,r*.055,0,0,6.29);ctx.fill();});
+  // city lights pop on in the darkness
+  if(st>8.2){city.forEach(c=>{const pop=spring((st-8.2-c.dl)*3);if(pop<=0)return;
+    ctx.fillStyle=`rgba(255,205,120,${0.9*pop})`;ctx.beginPath();ctx.arc(e.x+c.x*r,e.y+c.y*r,c.s,0,6.29);ctx.fill();});}
   ctx.restore();
-  // cyan rim
-  ctx.strokeStyle=`rgba(120,220,250,${0.25+0.35*df})`;ctx.lineWidth=3;ctx.beginPath();ctx.arc(e.x,e.y,r,0,6.29);ctx.stroke();
-  return e;
+  ctx.strokeStyle='rgba(120,220,250,0.45)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(e.x,e.y,r,0,6.29);ctx.stroke();
+  // axis line (tilt visual)
+  const dev=tiltDev(st),ang=(23.5+dev)*Math.PI/180;
+  const dx=Math.sin(ang),dy=-Math.cos(ang),L=r*1.5;
+  ctx.save();ctx.strokeStyle=st>20.6?'rgba(255,217,138,0.9)':'rgba(200,230,250,0.55)';ctx.lineWidth=5;ctx.setLineDash([18,12]);
+  ctx.beginPath();ctx.moveTo(e.x-dx*L,e.y-dy*L);ctx.lineTo(e.x+dx*L,e.y+dy*L);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=st>20.6?'#ffd98a':'rgba(200,230,250,0.8)';
+  ctx.beginPath();ctx.arc(e.x+dx*L,e.y+dy*L,9,0,6.29);ctx.fill();ctx.restore();
+  return{x:e.x+dx*L,y:e.y+dy*L,dev};
 }
-function drawAstronaut(x,y,s,t,lookX,lookY,shades){
+function drawAstronaut(x,y,s,t,lookX,lookY,lantern,lean){
   const bob=Math.sin(t*1.7)*7*s,sq=1+Math.sin(t*1.7)*0.02;
-  ctx.save();ctx.translate(x,y+bob);ctx.scale(s*sq,s/sq);
-  ctx.fillStyle='#ff8f4a';rr(-52,66,38,26,9);ctx.fill();rr(14,66,38,26,9);ctx.fill(); // boots
-  ctx.fillStyle='#dfe9f2';rr(-56,8,34,64,12);ctx.fill();rr(22,8,34,64,12);ctx.fill(); // legs
-  ctx.fillStyle='#f3f7fb';rr(-58,-52,116,72,22);ctx.fill(); // torso
-  ctx.fillStyle='#e4eef6';rr(-88,-46,30,58,13);ctx.fill();rr(58,-46,30,58,13);ctx.fill(); // arms
-  ctx.fillStyle='#f3f7fb';ctx.beginPath();ctx.arc(0,-88,52,0,6.29);ctx.fill(); // helmet
+  ctx.save();ctx.translate(x,y+bob);ctx.rotate(lean||0);ctx.scale(s*sq,s/sq);
+  ctx.fillStyle='#ff8f4a';rr(-52,66,38,26,9);ctx.fill();rr(14,66,38,26,9);ctx.fill();
+  ctx.fillStyle='#dfe9f2';rr(-56,8,34,64,12);ctx.fill();rr(22,8,34,64,12);ctx.fill();
+  ctx.fillStyle='#f3f7fb';rr(-58,-52,116,72,22);ctx.fill();
+  ctx.fillStyle='#e4eef6';rr(-88,-46,30,58,13);ctx.fill();rr(58,-46,30,58,13);ctx.fill();
+  ctx.fillStyle='#f3f7fb';ctx.beginPath();ctx.arc(0,-88,52,0,6.29);ctx.fill();
   const vg=ctx.createLinearGradient(-40,-130,40,-50);vg.addColorStop(0,'#1f5a73');vg.addColorStop(1,'#0a1c2c');
   ctx.fillStyle=vg;ctx.beginPath();ctx.ellipse(0,-88,40,34,0,0,6.29);ctx.fill();
   const lx=clamp((lookX-x)*0.012,-9,9),ly=clamp((lookY-y)*0.012,-6,6);
@@ -171,145 +172,183 @@ function drawAstronaut(x,y,s,t,lookX,lookY,shades){
   ctx.beginPath();ctx.ellipse(14+lx,-90+ly,6,6*blink,0,0,6.29);ctx.fill();ctx.shadowBlur=0;
   ctx.strokeStyle='#c8d8e4';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(30,-128);ctx.quadraticCurveTo(52,-160,44,-172);ctx.stroke();
   const bl=(t%1.6)<0.8?'#ff5f6b':'#7a2b33';ctx.fillStyle=bl;ctx.beginPath();ctx.arc(44,-176,7,0,6.29);ctx.fill();
-  ctx.fillStyle='#ffd98a';rr(-20,-30,40,16,6);ctx.fill(); // chest patch
-  if(shades>0){const dy=-190*(1-easeOQ(clamp(shades,0,1)))+Math.max(0,spring(shades*1.2)-1)*6;
-    ctx.save();ctx.translate(0,-92+dy);ctx.fillStyle='#0b0f16';rr(-44,-16,88,30,10);ctx.fill();
-    ctx.strokeStyle='#0b0f16';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(-44,-8);ctx.lineTo(-58,-16);ctx.moveTo(44,-8);ctx.lineTo(58,-16);ctx.stroke();ctx.restore();}
+  ctx.fillStyle='#ffd98a';rr(-20,-30,40,16,6);ctx.fill();
+  // lantern hanging from the left hand
+  ctx.strokeStyle='#c8d8e4';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-73,-6);ctx.lineTo(-84,16);ctx.stroke();
+  if(lantern>0){const fl=0.82+0.18*Math.sin(t*23)+0.08*Math.sin(t*57);
+    const lg=ctx.createRadialGradient(-84,44,2,-84,44,64);lg.addColorStop(0,`rgba(255,205,110,${0.5*lantern*fl})`);lg.addColorStop(1,'rgba(255,205,110,0)');
+    ctx.fillStyle=lg;ctx.beginPath();ctx.arc(-84,44,64,0,6.29);ctx.fill();}
+  ctx.fillStyle='#26313d';rr(-96,20,24,42,5);ctx.fill();
+  ctx.fillStyle=lantern>0?'#ffd98a':'#5a6a76';rr(-92,27,16,26,3);ctx.fill();
+  ctx.strokeStyle='#26313d';ctx.lineWidth=4;ctx.beginPath();ctx.arc(-84,16,8,Math.PI,0);ctx.stroke();
   ctx.restore();
 }
-// narration sentence pills
-const SENT=[[0.0,"WHAT IF THE SUN VANISHED"],[1.4,"NOT EXPLODED, JUST GONE"],[3.22,"FOR EIGHT MINUTES TWENTY SECONDS, YOU'D NEVER KNOW"],[5.74,"THE LAST LIGHT IS STILL TRAVELLING TO YOU"],[7.8,"IT LEFT THE SUN EIGHT MINUTES AGO"],[9.7,"YOU PRESSED PLAY FIFTEEN SECONDS AGO"],[11.9,"ALREADY IN ITS PAST"],[12.94,"THEN NOTHING"],[14.16,"DARKNESS SWEEPS EARTH, CITY LIGHTS POP ON"],[16.38,"JUPITER STILL SHINES, AN HOUR BEHIND US"],[18.8,"AND GRAVITY VANISHES TOO"],[20.46,"EARTH FLIES STRAIGHT, THIRTY KILOMETRES A SECOND"],[22.74,"INTO THE COLD"],[23.68,"MINUS SEVENTY DEGREES WITHIN A WEEK"],[25.48,"THAT SUNLIGHT? EIGHT MINUTES OLD"],[27.7,"NEVER GUARANTEED"]];
+// narration sentence pills (design time)
+const SENT=[[0.0,"WHAT IF THE MOON VANISHED"],[2.2,"YOU WOULD KNOW ALMOST INSTANTLY"],[4.4,"MOONLIGHT TAKES JUST ONE POINT THREE SECONDS TO REACH YOU"],[7.6,"THEN, DARKNESS. REAL DARKNESS"],[9.6,"THE TIDES, PULLED BY THE MOON, SHRINK TO A THIRD"],[12.4,"DRIVEN ONLY BY THE SUN"],[13.8,"BEACHES STILL BREATHE, BUT BARELY"],[15.8,"SEA TURTLES LOSE THEIR CALENDAR"],[17.8,"CORAL RELEASE THEIR EGGS TO A SIGNAL THAT NEVER COMES"],[20.6,"AND SLOWLY, OVER THOUSANDS OF YEARS"],[22.8,"EARTH'S TILT BEGINS TO WANDER"],[24.8,"SEASONS TURN WILD. ICE AGES SWING"],[26.8,"ALL FROM LOSING THE ANCHOR IN OUR SKY"],[28.8,"THAT PALE LIGHT? IT WAS HOLDING US STEADY"]];
 function draw(t){
   window.__t=t;
-  // story clock with brief rewind of HUD elements only
   const st=t;
-  const cam=camera(t),e=earthPos(t);
+  const cam=camera(t);
   ctx.setTransform(1,0,0,1,0,0);
-  // background
-  const bgDim=t<17.4?0:clamp((t-17.4)/1.1,0,1)*0.72-(t>27.7?clamp((t-27.7)/1,0,1)*0.35:0);
+  const dark=clamp((st-7.6)/1.1,0,1);
+  let bgDim=dark*0.45;if(st>30.2)bgDim+=clamp((st-30.2)/1,0,1)*0.3;
   const bg=ctx.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#081d2c');bg.addColorStop(1,'#102348');
   ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
   ctx.save();
   ctx.translate(W/2,H/2);ctx.scale(cam.z,cam.z);ctx.translate(-cam.x,-cam.y);
-  // nebula (parallax approximated by depth-scaled offset toward camera centre)
   nebula.forEach(n=>{const px=n.x+(cam.x-960)*0.03,py=n.y+(cam.y-540)*0.03;
     const g=ctx.createRadialGradient(px,py,0,px,py,n.r);g.addColorStop(0,`rgba(${n.c},${n.a})`);g.addColorStop(1,`rgba(${n.c},0)`);
     ctx.fillStyle=g;ctx.fillRect(px-n.r,py-n.r,n.r*2,n.r*2);});
-  // stars
+  const starMul=1+0.45*dark;
   stars.forEach(s=>{const tw=0.55+0.45*Math.sin(t*s.sp+s.ph);
     const px=s.x+(cam.x-960)*s.L*0.05,py=s.y+(cam.y-540)*s.L*0.05;
-    ctx.fillStyle=`rgba(255,255,255,${0.75*tw})`;
+    ctx.fillStyle=`rgba(255,255,255,${Math.min(1,0.75*tw*starMul)})`;
     if(s.spark){ctx.save();ctx.translate(px,py);ctx.beginPath();ctx.moveTo(0,-s.r*3.4);ctx.quadraticCurveTo(0,0,s.r*3.4,0);ctx.quadraticCurveTo(0,0,0,s.r*3.4);ctx.quadraticCurveTo(0,0,-s.r*3.4,0);ctx.quadraticCurveTo(0,0,0,-s.r*3.4);ctx.fill();ctx.restore();}
     else{ctx.beginPath();ctx.arc(px,py,s.r,0,6.29);ctx.fill();}});
-  // orbit circle (visible in wide views)
-  if(cam.z<0.7){ctx.strokeStyle='rgba(160,210,240,0.28)';ctx.lineWidth=3/cam.z*0.32;ctx.setLineDash([14,12]);
-    ctx.beginPath();ctx.arc(SUN.x,SUN.y,707,0,6.29);ctx.stroke();ctx.setLineDash([]);}
-  // darkness disc (growing from Sun position)
-  const fr=frontR(t);
-  if(t>1.31){const dg=ctx.createRadialGradient(SUN.x,SUN.y,Math.max(0,fr-30),SUN.x,SUN.y,fr);
-    dg.addColorStop(0,'rgba(2,6,18,0.88)');dg.addColorStop(.92,'rgba(2,6,18,0.88)');dg.addColorStop(1,'rgba(2,6,18,0)');
-    ctx.fillStyle=dg;ctx.beginPath();ctx.arc(SUN.x,SUN.y,fr,0,6.29);ctx.fill();}
-  drawSun(t,st);
-  // flash + shockwave
-  if(st>1.31&&st<1.75){const p=(st-1.31)/0.44;ctx.fillStyle=`rgba(255,255,255,${0.85*(1-p)})`;ctx.fillRect(cam.x-W/2/cam.z,cam.y-H/2/cam.z,W/cam.z,H/cam.z);}
-  if(st>1.31&&st<3.2){const p=(st-1.31)/1.89;ctx.strokeStyle=`rgba(200,240,255,${0.8*(1-p)})`;ctx.lineWidth=10*(1-p)+2;
-    ctx.beginPath();ctx.arc(SUN.x,SUN.y,60+p*950,0,6.29);ctx.stroke();}
-  // dotted circle at empty centre
-  if(st>13.18){ctx.strokeStyle=`rgba(255,255,255,${0.4+0.2*Math.sin(t*3)})`;ctx.lineWidth=5;ctx.setLineDash([16,14]);
-    ctx.beginPath();ctx.arc(SUN.x,SUN.y,210,0,6.29);ctx.stroke();ctx.setLineDash([]);}
-  // light streaks flowing into Earth (dive beat)
-  if(st>5.6&&st<14.1){ctx.strokeStyle='rgba(255,230,160,0.5)';ctx.lineWidth=4;
-    for(let i=0;i<7;i++){const yy=e.y-150+i*50;const ph=((t*900+i*260)%900)/900;
-      const x1=e.x-700+ph*520;ctx.beginPath();ctx.moveTo(x1,yy);ctx.lineTo(x1+110,yy);ctx.stroke();}}
-  // Jupiter
-  if(st>16.38&&st<20.6){const jp=spring((st-16.38)*2.2);const jx=870,jy=470,jr=62*Math.max(.2,jp);
-    const jg=ctx.createRadialGradient(jx,jy,jr,jx,jy,jr*1.7);jg.addColorStop(0,'rgba(255,220,170,0.35)');jg.addColorStop(1,'rgba(255,220,170,0)');
-    ctx.fillStyle=jg;ctx.beginPath();ctx.arc(jx,jy,jr*1.7,0,6.29);ctx.fill();
-    ctx.save();ctx.beginPath();ctx.arc(jx,jy,jr,0,6.29);ctx.clip();
-    ['#d8b48c','#b98a5e','#e8d0a8','#c49a6c','#e2c491','#a97c50'].forEach((c,i)=>{ctx.fillStyle=c;ctx.fillRect(jx-jr,jy-jr+i*(2*jr/6),2*jr,2*jr/6+1);});
-    ctx.fillStyle='#d96f4e';ctx.beginPath();ctx.ellipse(jx+jr*.3,jy+jr*.25,jr*.22,jr*.11,0,0,6.29);ctx.fill();ctx.restore();
-    ctx.strokeStyle='rgba(140,220,250,0.4)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(jx,jy,jr,0,6.29);ctx.stroke();}
-  // tangent dashed line + Earth
-  if(st>20.46){ctx.strokeStyle='rgba(255,217,138,0.75)';ctx.lineWidth=5;ctx.setLineDash([22,16]);
-    ctx.beginPath();ctx.moveTo(620,960);ctx.lineTo(620+0.48*1200,960-0.877*1200);ctx.stroke();ctx.setLineDash([]);}
-  drawEarth(t,st);
-  // astronaut: anchored near Earth, looks at what matters
-  let look={x:SUN.x,y:SUN.y};if(st>5.6)look={x:e.x,y:e.y};if(st>25.2)look={x:e.x+300,y:e.y-200};
-  const ax=e.x+e.r+105,ay=e.y+95;
-  const shades=st>25.2?(st-25.2):0;
-  drawAstronaut(ax,ay,0.92,t,look.x,look.y,shades);
-  // YOU pin / play button on Earth
-  if(st>7.44&&st<12.6){const px=e.x-40,py=e.y-e.r-58;
-    if(st<10.0){const drop=spring((st-7.44)*2.6);const dy=-260*(1-easeOQ(clamp((st-7.44)/0.4,0,1)));
-      ctx.save();ctx.translate(px,py+dy);ctx.scale(Math.max(.3,drop),Math.max(.3,drop));
-      ctx.fillStyle='#ffd98a';ctx.beginPath();ctx.arc(0,-26,30,0,6.29);ctx.fill();
-      ctx.beginPath();ctx.moveTo(-24,-8);ctx.lineTo(0,34);ctx.lineTo(24,-8);ctx.fill();
-      ctx.fillStyle='#102348';ctx.beginPath();ctx.arc(0,-26,13,0,6.29);ctx.fill();ctx.restore();}
-    else{const m=spring((st-10.0)*3);ctx.save();ctx.translate(px,py);ctx.scale(Math.max(.3,m),Math.max(.3,m));
-      ctx.fillStyle='#ffd98a';ctx.beginPath();ctx.arc(0,0,36,0,6.29);ctx.fill();
-      ctx.fillStyle='#102348';ctx.beginPath();ctx.moveTo(-11,-16);ctx.lineTo(20,0);ctx.lineTo(-11,16);ctx.fill();ctx.restore();}}
-  // photon to pin
-  if(st>7.86&&st<8.35){const p=(st-7.86)/0.49;const fx=lerp(SUN.x+80,e.x-60,p),fy=lerp(SUN.y,e.y-e.r-70,p);
-    ctx.fillStyle='#fff3b0';ctx.shadowColor='#ffd94a';ctx.shadowBlur=26;ctx.beginPath();ctx.arc(fx,fy,11,0,6.29);ctx.fill();ctx.shadowBlur=0;}
-  // expanding ring labels in orbit view
-  if(st>9.6&&st<13.2){const rp=((st-9.6)/2.9)*707;ctx.strokeStyle='rgba(143,216,230,0.4)';ctx.lineWidth=4;
-    ctx.beginPath();ctx.arc(SUN.x,SUN.y,rp,0,6.29);ctx.stroke();}
+  // Moon's orbit path around Earth (faint dashed ellipse)
+  ctx.strokeStyle='rgba(160,210,240,0.20)';ctx.lineWidth=3;ctx.setLineDash([12,12]);
+  ctx.beginPath();ctx.ellipse(EARTH.x,EARTH.y,600,760,0.5,0,6.29);ctx.stroke();ctx.setLineDash([]);
+  // moonbeams still arriving until the counter hits zero
+  if(st<5.9){ctx.strokeStyle=`rgba(225,238,252,${0.30*(1-st/6.5)})`;ctx.lineWidth=4;
+    for(let i=0;i<5;i++){const off=-120+i*60;const ph=((t*700+i*180)%700)/700;
+      const x1=lerp(MOON.x-100,EARTH.x+120,ph),y1=lerp(MOON.y+80,EARTH.y-140,ph);
+      ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x1-46,y1+64);ctx.stroke();}}
+  drawMoon(t,st);
+  // flash + shockwave on the vanish
+  if(st>1.55&&st<2.0){const p=(st-1.55)/0.45;ctx.fillStyle=`rgba(255,255,255,${0.85*(1-p)})`;ctx.fillRect(cam.x-W/2/cam.z,cam.y-H/2/cam.z,W/cam.z,H/cam.z);}
+  if(st>1.55&&st<3.4){const p=(st-1.55)/1.85;ctx.strokeStyle=`rgba(210,235,255,${0.8*(1-p)})`;ctx.lineWidth=10*(1-p)+2;
+    ctx.beginPath();ctx.arc(MOON.x,MOON.y,60+p*950,0,6.29);ctx.stroke();}
+  // dotted outline where the Moon was
+  if(st>7.6){ctx.strokeStyle=`rgba(255,255,255,${0.35+0.15*Math.sin(t*3)})`;ctx.lineWidth=5;ctx.setLineDash([16,14]);
+    ctx.beginPath();ctx.arc(MOON.x,MOON.y,MOON.r,0,6.29);ctx.stroke();ctx.setLineDash([]);}
+  const axInfo=drawEarth(t,st);
+  // anchor tether: Earth axis -> empty Moon spot, breaking up
+  if(st>26.8&&st<29.8){const fade=1-clamp((st-28.6)/1.2,0,1);
+    const mx=MOON.x+40*clamp((st-26.8)/3,0,1),my=MOON.y-30*clamp((st-26.8)/3,0,1);
+    const keep=lerp(1,0.25,clamp((st-26.8)/2.2,0,1));
+    ctx.save();ctx.strokeStyle=`rgba(255,217,138,${0.75*fade})`;ctx.lineWidth=5;ctx.setLineDash([20,14]);
+    ctx.beginPath();ctx.moveTo(axInfo.x,axInfo.y);ctx.lineTo(lerp(axInfo.x,mx,keep),lerp(axInfo.y,my,keep));ctx.stroke();ctx.setLineDash([]);
+    // little anchor drifting loose
+    ctx.translate(mx,my);ctx.rotate(0.5+0.2*Math.sin(t*1.3));ctx.globalAlpha=fade;
+    ctx.strokeStyle='#ffd98a';ctx.lineWidth=7;ctx.beginPath();ctx.arc(0,-26,11,0,6.29);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(0,-15);ctx.lineTo(0,30);ctx.moveTo(-16,2);ctx.lineTo(16,2);
+    ctx.moveTo(-24,14);ctx.quadraticCurveTo(-22,34,0,34);ctx.quadraticCurveTo(22,34,24,14);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(-24,14);ctx.lineTo(-30,2);ctx.moveTo(24,14);ctx.lineTo(30,2);ctx.stroke();
+    ctx.restore();}
+  // astronaut with lantern; counter-leans against the tilt wander
+  const lean=st>22.8?-axInfo.dev*0.006:0;
+  const lantern=dark;
+  let look={x:MOON.x,y:MOON.y};if(st>5.9)look={x:EARTH.x,y:EARTH.y};if(st>22.8)look={x:axInfo.x,y:axInfo.y};
+  drawAstronaut(EARTH.x+EARTH.r+105,EARTH.y+95,0.92,t,look.x,look.y,lantern,lean);
   ctx.restore(); // end world transform
   // ---- screen-space overlays ----
-  // LAST LIGHT label riding front edge
-  if(st>3.2&&st<14.9){const sx=(SUN.x+fr-cam.x)*cam.z+W/2,sy=(SUN.y-245-cam.y)*cam.z+H/2;
-    if(sx>-200&&sx<W+200)pill(["LAST LIGHT"],clamp(sx,180,W-180),clamp(sy,90,H-90),'#8fd8e6',3.2,Math.min(1,cam.z*1.4));}
-  // countdown
-  if(st>3.4&&st<16.9){const remain=Math.max(0,500*(1-(st-3.4)/(14.86-3.4)));
-    const mm=Math.floor(remain/60),ss=Math.floor(remain%60);
-    const txt=`${mm}:${ss.toString().padStart(2,'0')}`;
-    const sc=spring((st-3.4)*2.4);const gold=remain<=0;
+  // 1.3-second counter (the anti-8:20 gag)
+  if(st>4.6&&st<7.4){const remain=Math.max(0,1.30*(1-(st-4.6)/1.3));
+    const sc=spring((st-4.6)*2.4);
     ctx.save();ctx.translate(820,115);ctx.scale(Math.max(.4,sc),Math.max(.4,sc));
     ctx.fillStyle='rgba(6,20,40,0.62)';rr(-120,-52,240,104,22);ctx.fill();
-    ctx.strokeStyle=gold?'#ffd98a':'rgba(143,216,230,0.4)';ctx.lineWidth=3;rr(-120,-52,240,104,22);ctx.stroke();
-    ctx.font='800 62px Mont';ctx.fillStyle=gold?'#ffd98a':'#ffffff';ctx.textAlign='center';ctx.textBaseline='middle';
-    drawSpaced(txt,0,4,6);ctx.restore();
-    if(st<5)pill(["LAST LIGHT LEFT"],820,220,'#8fd8e6',3.55,0.8);}
-  // orbit ring labels (screen approx positions)
-  if(st>10.4&&st<12.9){pill(["LAST LIGHT"],300,640,'#8fd8e6',10.4,0.85);pill(["GRAVITY"],790,1300,'#ffd98a',10.9,0.85);}
-  if(st>18.9&&st<20.4)pill(["GRAVITY VANISHES TOO"],540,175,'#ffd98a',18.9,0.9);
-  // photon / play captions
-  if(st>8.35&&st<9.95)pill(["THIS LIGHT LEFT THE SUN","8 MIN 20 SEC AGO"],540,1570,'#8fd8e6',8.35);
-  if(st>10.3&&st<12.4)pill(["YOU PRESSED PLAY","15 SEC AGO"],540,1570,'#ffd98a',10.3);
-  if(st>17.9&&st<20.4)pill(["STILL SHINING FOR 1 HOUR+"],540,1570,'#ffd98a',17.9);
-  if(st>20.9&&st<23.4)pill(["30 KM/S"],690,330,'#ffffff',20.9,1.05);
-  // thermometer
-  if(st>22.8&&st<26.8){const temp=Math.round(15-85*clamp((st-22.8)/2.3,0,1));
-    const tx=872,ty=620,th=380,fill=clamp((temp+80)/100,0,1);
+    ctx.strokeStyle=remain<=0?'#ffd98a':'rgba(143,216,230,0.4)';ctx.lineWidth=3;rr(-120,-52,240,104,22);ctx.stroke();
+    ctx.font='800 62px Mont';ctx.fillStyle=remain<=0?'#ffd98a':'#ffffff';ctx.textAlign='center';ctx.textBaseline='middle';
+    drawSpaced(remain.toFixed(2),0,4,6);ctx.restore();
+    pill(["LAST MOONLIGHT"],820,220,'#8fd8e6',4.75,0.8);
+    if(st>6.0)pill(["THE SUN TOOK 8 MIN 20 SEC"],820,302,'#ffd98a',6.0,0.62);}
+  // tide gauge
+  if(st>9.6&&st<15.5){const ba=bulgeAmt(st);const tx=872,ty=620,th=380;
     ctx.save();ctx.fillStyle='rgba(6,20,40,0.62)';rr(tx-58,ty-90,150,th+170,24);ctx.fill();
     ctx.strokeStyle='rgba(255,255,255,0.5)';ctx.lineWidth=6;rr(tx,ty,34,th,17);ctx.stroke();
-    ctx.fillStyle=temp>-20?'#ff9a5c':'#8fd8e6';const fh=th*fill;rr(tx+5,ty+th-fh+5,24,Math.max(10,fh-5),12);ctx.fill();
+    ctx.fillStyle='#4dc7eb';const fh=th*ba;rr(tx+5,ty+th-fh+5,24,Math.max(10,fh-5),12);ctx.fill();
     ctx.beginPath();ctx.arc(tx+17,ty+th+42,34,0,6.29);ctx.fill();
-    ctx.font='800 44px Mont';ctx.fillStyle='#ffffff';ctx.textAlign='center';drawSpaced(`${temp}°C`,tx+17,ty-38,3);ctx.restore();}
-  // rewind HUD gag
-  if(st>24.3&&st<25.15){pill(["◂◂ REWIND"],235,150,'#8fd8e6',24.3,0.9);}
-  // photon callback tag
-  if(st>25.68){const p=clamp((st-25.68)/0.5,0,1);const fx=lerp(-60,430,easeOQ(p)),fy=lerp(620,760,easeOQ(p));
-    if(st<27.6){ctx.fillStyle='#fff3b0';ctx.shadowColor='#ffd94a';ctx.shadowBlur=26;ctx.beginPath();ctx.arc(fx,fy,11,0,6.29);ctx.fill();ctx.shadowBlur=0;
-      pill(["8:20 OLD"],fx+120,fy-56,'#ffd98a',25.85,0.85);}}
-  // narration sentence pill (bottom)
-  if(st<27.7){let cur=SENT[0];for(const s of SENT)if(st>=s[0])cur=s;
-    if(cur)pill([cur[1]],540,1790,'#ffffff',cur[0],0.72);}
+    ctx.font='800 40px Mont';ctx.fillStyle='#ffffff';ctx.textAlign='center';drawSpaced("TIDE",tx+17,ty-38,3);
+    if(ba<0.45){ctx.font='800 54px Mont';ctx.fillStyle='#ffd98a';drawSpaced("1/3",tx-128,ty+th+42,3);}
+    ctx.restore();}
+  if(st>10.2&&st<12.6)pill(["TIDES SHRINK TO A THIRD"],540,1170,'#8fd8e6',10.2,0.9);
+  // shore strip: sea + sand (beach / turtle / coral beats)
+  if(st>13.4&&st<20.8){const fadeIn=clamp((st-13.4)/0.5,0,1),fadeOut=clamp((20.8-st)/0.5,0,1);
+    ctx.save();ctx.globalAlpha=Math.min(fadeIn,fadeOut);
+    const amp=st<13.8?16:lerp(16,5,clamp((st-13.8)/1.2,0,1));
+    ctx.fillStyle='#17507e';ctx.beginPath();ctx.moveTo(0,1560);
+    for(let x=0;x<=1080;x+=30)ctx.lineTo(x,1560+Math.sin(x*0.02+t*2.2)*amp);
+    ctx.lineTo(1080,1700);ctx.lineTo(0,1700);ctx.fill();
+    ctx.fillStyle='#e6cf9a';ctx.beginPath();ctx.moveTo(0,1700);
+    for(let x=0;x<=1080;x+=30)ctx.lineTo(x,1700+Math.sin(x*0.015+t*1.4)*4);
+    ctx.lineTo(1080,1790);ctx.lineTo(0,1790);ctx.fill();
+    // coral in the shallows + eggs released to a signal that never comes
+    if(st>17.8){ctx.save();ctx.translate(180,1692);ctx.strokeStyle='#ff8f7a';ctx.lineCap='round';
+      coralBr.forEach(b=>{ctx.lineWidth=b.w;ctx.beginPath();ctx.moveTo(0,0);
+        ctx.quadraticCurveTo(Math.sin(b.a)*b.l*0.5,-Math.cos(b.a)*b.l*0.6,Math.sin(b.a)*b.l,-Math.cos(b.a)*b.l);ctx.stroke();});
+      ctx.strokeStyle='#ffb37a';coralBr.forEach(b=>{if(b.w>5){ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(Math.sin(b.a)*b.l*0.55,-Math.cos(b.a)*b.l*0.6);
+        ctx.lineTo(Math.sin(b.a)*b.l*0.55+14,-Math.cos(b.a)*b.l*0.6-22);ctx.stroke();}});
+      ctx.restore();
+      if(st>18.4){eggs.forEach(g=>{const p=clamp((st-18.4-g.delay)/1.6,0,1);if(p<=0||p>=1)return;
+        const ex=180+g.dx*0.4+Math.sin(t*2+g.ph)*10,ey=1640-p*g.rise;
+        const fade=p>0.72?1-(p-0.72)/0.28:1;
+        ctx.fillStyle=`rgba(255,190,160,${0.85*fade})`;ctx.beginPath();ctx.arc(ex,ey,g.s,0,6.29);ctx.fill();});}}
+    // turtle crawling the sand
+    if(st>15.8&&st<17.9){const tx2=lerp(760,580,(st-15.8)/2.1),ty2=1742;
+      ctx.save();ctx.translate(tx2,ty2);
+      ctx.fillStyle='#3a9d62';
+      [[-38,10],[38,10],[-30,-16],[30,-16]].forEach((f,i)=>{ctx.save();ctx.translate(f[0],f[1]);ctx.rotate(Math.sin(t*5+i*1.7)*0.4);
+        ctx.beginPath();ctx.ellipse(12,0,20,9,0,0,6.29);ctx.fill();ctx.restore();});
+      ctx.beginPath();ctx.ellipse(52,-8,17,13,0,0,6.29);ctx.fill(); // head
+      ctx.fillStyle='#48ad6b';ctx.beginPath();ctx.ellipse(0,0,52,34,0,0,6.29);ctx.fill();
+      ctx.fillStyle='#2f7d4e';ctx.beginPath();ctx.ellipse(0,-2,38,23,0,0,6.29);ctx.fill();
+      ctx.strokeStyle='rgba(20,60,35,0.6)';ctx.lineWidth=3;
+      ctx.beginPath();ctx.moveTo(-38,-2);ctx.lineTo(38,-2);ctx.moveTo(0,-25);ctx.lineTo(0,21);ctx.stroke();
+      ctx.restore();
+      // its moon calendar, crossed out
+      const calA=st>16.8?0.5:1;
+      ctx.save();ctx.globalAlpha*=calA;ctx.translate(150,1568);
+      ctx.fillStyle='rgba(245,248,250,0.92)';rr(0,0,170,128,14);ctx.fill();
+      ctx.fillStyle='#ffd98a';ctx.beginPath();ctx.arc(38,34,19,0,6.29);ctx.fill();
+      ctx.fillStyle='rgba(140,155,172,0.7)';ctx.beginPath();ctx.arc(32,29,5,0,6.29);ctx.fill();ctx.beginPath();ctx.arc(45,42,4,0,6.29);ctx.fill();
+      ctx.fillStyle='#8fa4b5';for(let gx=0;gx<5;gx++)for(let gy=0;gy<2;gy++){ctx.beginPath();ctx.arc(24+gx*30,84+gy*28,6,0,6.29);ctx.fill();}
+      ctx.restore();
+      if(st>16.8){ctx.save();ctx.globalAlpha*=0.95;ctx.strokeStyle='#ff5f6b';ctx.lineWidth=8;ctx.lineCap='round';
+        ctx.beginPath();ctx.moveTo(168,1590);ctx.lineTo(212,1624);ctx.moveTo(212,1590);ctx.lineTo(168,1624);ctx.stroke();ctx.restore();}}
+    ctx.restore();}
+  // tilt readout
+  if(st>21.5&&st<28.6){const dev=tiltDev(st),val=(23.5+dev).toFixed(1);
+    ctx.save();ctx.translate(215,115);
+    ctx.fillStyle='rgba(6,20,40,0.62)';rr(-155,-52,310,104,22);ctx.fill();
+    ctx.strokeStyle=Math.abs(dev)>10?'#ffd98a':'rgba(143,216,230,0.4)';ctx.lineWidth=3;rr(-155,-52,310,104,22);ctx.stroke();
+    ctx.font='800 56px Mont';ctx.fillStyle=Math.abs(dev)>10?'#ffd98a':'#ffffff';ctx.textAlign='center';ctx.textBaseline='middle';
+    drawSpaced(`TILT ${val}°`,0,4,4);ctx.restore();}
+  if(st>23.2&&st<25.6)pill(["THE TILT BEGINS TO WANDER"],540,1170,'#ffd98a',23.2,0.9);
+  // seasons dial
+  if(st>24.8&&st<28.6){const cx2=170,cy2=1640,r2=88;
+    ctx.save();ctx.globalAlpha=clamp((st-24.8)/0.4,0,1)*clamp((28.6-st)/0.4,0,1);
+    ctx.fillStyle='rgba(6,20,40,0.62)';ctx.beginPath();ctx.arc(cx2,cy2,r2+16,0,6.29);ctx.fill();
+    const cols=['#ffd98a','#5fc47a','#ff8f4a','#a8d8f0'];
+    for(let i=0;i<4;i++){ctx.fillStyle=cols[i];ctx.beginPath();ctx.moveTo(cx2,cy2);
+      ctx.arc(cx2,cy2,r2,i*Math.PI/2-0.35,(i+1)*Math.PI/2-0.35);ctx.fill();}
+    const na=(st-24.8)*1.9+Math.sin(st*6)*0.35;
+    ctx.strokeStyle='#ffffff';ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(cx2,cy2);
+    ctx.lineTo(cx2+Math.cos(na)*r2*0.82,cy2+Math.sin(na)*r2*0.82);ctx.stroke();
+    ctx.fillStyle='#ffffff';ctx.beginPath();ctx.arc(cx2,cy2,11,0,6.29);ctx.fill();
+    ctx.font='800 30px Mont';ctx.fillStyle='#ffd98a';ctx.textAlign='center';drawSpaced("SEASONS",cx2,cy2+r2+52,4);
+    ctx.restore();}
+  // callback moonbeam: 1.3 seconds old
+  if(st>29.2&&st<30.7){const p=clamp((st-29.2)/0.6,0,1);
+    const fx=lerp(MOON.x,EARTH.x+60,easeOQ(p)),fy=lerp(MOON.y,EARTH.y-190,easeOQ(p));
+    if(p<1){ctx.fillStyle='#eef4fb';ctx.shadowColor='#cfe4ff';ctx.shadowBlur=26;ctx.beginPath();ctx.arc(fx,fy,11,0,6.29);ctx.fill();ctx.shadowBlur=0;}
+    if(st>29.5)pill(["1.3 SEC OLD"],clamp(fx+130,240,860),fy-60,'#ffd98a',29.5,0.85);}
+  // narration sentence pill
+  if(st<30.2){let cur=SENT[0];for(const s of SENT)if(st>=s[0])cur=s;
+    if(cur)pill([cur[1]],540,1390,'#ffffff',cur[0],0.72);}
   // title
-  if(st>27.7){bigText(["WHAT IF","THE SUN","VANISHED?"],540,880,118,'#ffd98a',27.7);
-    pill(["THAT SUNLIGHT WAS 8 MINUTES OLD"],540,1250,'#8fd8e6',28.15,0.9);}
-  // background dim + vignette + grain
+  if(st>30.2){bigText(["WHAT IF","THE MOON","VANISHED?"],540,880,118,'#ffd98a',30.2);
+    pill(["THAT PALE LIGHT WAS HOLDING US STEADY"],540,1250,'#8fd8e6',30.65,0.9);}
   if(bgDim>0){ctx.fillStyle=`rgba(0,0,10,${bgDim})`;ctx.fillRect(0,0,W,H);
-    // re-draw title above dim
-    if(st>27.7){bigText(["WHAT IF","THE SUN","VANISHED?"],540,880,118,'#ffd98a',27.7);pill(["THAT SUNLIGHT WAS 8 MINUTES OLD"],540,1250,'#8fd8e6',28.15,0.9);}}
+    if(st>30.2){bigText(["WHAT IF","THE MOON","VANISHED?"],540,880,118,'#ffd98a',30.2);pill(["THAT PALE LIGHT WAS HOLDING US STEADY"],540,1250,'#8fd8e6',30.65,0.9);}}
   const vg=ctx.createRadialGradient(540,960,380,540,960,1300);vg.addColorStop(0,'rgba(4,4,20,0)');vg.addColorStop(1,'rgba(4,4,20,0.45)');
   ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
   ctx.save();ctx.globalAlpha=0.06;const pat=grains[Math.floor(t*24)%24];
   for(let gx=0;gx<W;gx+=256)for(let gy=0;gy<H;gy+=256)ctx.drawImage(pat,gx,gy);ctx.restore();
 }
-const WARP=[[0.0, 0.0], [1.38, 0.76], [2.34, 1.4], [5.26, 3.22], [5.44, 3.4], [8.68, 5.74], [10.46, 7.44], [11.28, 7.86], [13.2, 9.7], [13.58, 10.0], [17.52, 12.94], [18.56, 13.18], [20.08, 14.16], [21.94, 15.24], [23.6, 16.38], [26.5, 18.8], [28.1, 20.46], [31.48, 22.74], [33.22, 23.68], [36.16, 25.48], [39.14, 27.7], [40.6, 30.0]];
+const WARP=[[0,0],[1.48,1.0],[2.8,2.2],[3.66,3.4],[4.74,4.4],[5.52,4.6],[7.5,5.9],[8.44,7.6],[9.04,8.2],[11.72,9.6],[13.48,11.0],[14.6,12.4],[16.62,13.8],[18.88,15.8],[20.88,17.8],[22.3,19.0],[24.06,20.6],[26.58,22.8],[27.04,23.3],[28.2,24.8],[30.84,26.0],[32.66,26.8],[33.96,27.6],[35.2,28.8],[35.6,29.2],[37.1,30.2],[39.04,32.0]];
 function warp(rt){if(rt<=0)return 0;for(let i=1;i<WARP.length;i++){if(rt<=WARP[i][0]){const a=WARP[i-1],b=WARP[i];return a[1]+(b[1]-a[1])*(rt-a[0])/(b[0]-a[0]);}}return WARP[WARP.length-1][1];}
 window.seek=t=>{draw(warp(t));};
 window.seek(0);
+
 </script>
 </body></html>
